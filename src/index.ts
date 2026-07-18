@@ -43,10 +43,42 @@ import type {
 
 const EXTENSION_NAME = "pi-rewind-lite";
 const STORAGE_ROOT = join(homedir(), ".pi", "rewind-lite");
-const GC_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB — skip huge files
+const DEFAULT_CLEANUP_DAYS = 30;
+const DEFAULT_MAX_FILE_MB = 10;
 const ENTRY_TYPE_SNAPSHOT = "rewind-lite-snapshot";
 const ENTRY_TYPE_RESTORE = "rewind-lite-restore";
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+interface RewindConfig {
+	/** Days before session data is auto-cleaned. Default: 30. */
+	cleanupDays: number;
+	/** Skip files larger than this (MB). Default: 10. */
+	maxFileMB: number;
+}
+
+const CONFIG_PATH = join(homedir(), ".pi", "rewind-lite.json");
+let config: RewindConfig = {
+	cleanupDays: DEFAULT_CLEANUP_DAYS,
+	maxFileMB: DEFAULT_MAX_FILE_MB,
+};
+
+async function loadConfig(): Promise<void> {
+	try {
+		const raw = await readFile(CONFIG_PATH, "utf-8");
+		const parsed = JSON.parse(raw);
+		if (typeof parsed.cleanupDays === "number" && parsed.cleanupDays > 0) {
+			config.cleanupDays = parsed.cleanupDays;
+		}
+		if (typeof parsed.maxFileMB === "number" && parsed.maxFileMB > 0) {
+			config.maxFileMB = parsed.maxFileMB;
+		}
+	} catch {
+		// No config file or invalid JSON — use defaults
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -173,8 +205,9 @@ async function backupFile(
 	const absPath = toAbsolutePath(trackingPath, state.cwd);
 
 	// Check file size — skip huge files
+	const maxBytes = config.maxFileMB * 1024 * 1024;
 	const size = await getFileSize(absPath);
-	if (size !== null && size > MAX_FILE_SIZE) return null;
+	if (size !== null && size > maxBytes) return null;
 
 	const version = (state.fileVersions.get(trackingPath) ?? 0) + 1;
 	const bkName = backupFileName(trackingPath, version);
@@ -399,6 +432,7 @@ async function captureCurrentState(): Promise<Snapshot | null> {
 
 async function garbageCollect(): Promise<number> {
 	let cleaned = 0;
+	const maxAgeMs = config.cleanupDays * 24 * 60 * 60 * 1000;
 	try {
 		const sessions = await readdir(STORAGE_ROOT);
 		const now = Date.now();
@@ -407,7 +441,7 @@ async function garbageCollect(): Promise<number> {
 			try {
 				const s = await stat(sessionPath);
 				if (!s.isDirectory()) continue;
-				if (now - s.mtimeMs > GC_MAX_AGE_MS) {
+				if (now - s.mtimeMs > maxAgeMs) {
 					await rm(sessionPath, { recursive: true, force: true });
 					cleaned++;
 				}
@@ -426,6 +460,7 @@ async function garbageCollect(): Promise<number> {
 // ---------------------------------------------------------------------------
 
 async function initState(sessionId: string, cwd: string): Promise<void> {
+	await loadConfig();
 	const sessionDir = join(STORAGE_ROOT, sessionId);
 	const backupsDir = join(sessionDir, "backups");
 

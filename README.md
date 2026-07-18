@@ -106,10 +106,26 @@ Claude Code uses `{hash}@v{N}` naming but doesn't actually deduplicate by conten
 Backups live at `~/.pi/rewind-lite/` instead of inside your project. Your project directory stays clean. No `.git/refs/pi/*` cruft, no `.pi-checkpoints/` directory, nothing.
 
 **Why 10MB file size limit?**
-Files over 10MB are silently skipped. These are almost never source code — they're build artifacts, binaries, or data files. Backing them up would blow up disk usage for no practical benefit.
+Files over 10MB are silently skipped (configurable). These are almost never source code — they're build artifacts, binaries, or data files. Backing them up would blow up disk usage for no practical benefit.
 
-**Why auto-GC at 7 days?**
-Session data older than 7 days is cleaned up on startup. You're not going to `/rewind` a week-old session. This keeps `~/.pi/rewind-lite/` from growing unbounded.
+**Why auto-GC at 30 days?**
+Session data older than 30 days is cleaned up on startup (matching Claude Code's default). This keeps `~/.pi/rewind-lite/` from growing unbounded while still letting you `/rewind` sessions from weeks ago.
+
+## Configuration
+
+Optionally create `~/.pi/rewind-lite.json`:
+
+```json
+{
+  "cleanupDays": 30,
+  "maxFileMB": 10
+}
+```
+
+| Key | Default | Description |
+|---|---|---|
+| `cleanupDays` | `30` | Days before session data is auto-cleaned |
+| `maxFileMB` | `10` | Skip files larger than this (MB) |
 
 ## Storage Layout
 

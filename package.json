@@ -1,0 +1,36 @@
+{
+  "name": "pi-rewind-lite",
+  "version": "0.1.0",
+  "description": "Claude Code-style /rewind for Pi — lightweight file snapshots with 3-way restore (code only, conversation only, or both). No git, no workspace scanning.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pi",
+    "extension",
+    "rewind",
+    "undo",
+    "restore",
+    "checkpoint",
+    "rollback"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.6.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "typescript": "^5.5.0"
+  },
+  "files": [
+    "dist"
+  ]
+}

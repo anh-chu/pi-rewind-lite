@@ -6,7 +6,9 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "pi": {
-    "extensions": ["./dist/index.js"]
+    "extensions": [
+      "./dist/index.js"
+    ]
   },
   "scripts": {
     "build": "tsc",
@@ -28,6 +30,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "^0.80.10",
     "typescript": "^5.5.0"
   },
   "files": [

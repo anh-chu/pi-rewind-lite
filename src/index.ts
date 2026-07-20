@@ -31,11 +31,18 @@ import {
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
+import {
+	DynamicBorder,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import {
+	Container,
+	type SelectItem,
+	SelectList,
+	Text,
+} from "@earendil-works/pi-tui";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -670,16 +677,60 @@ export default function activate(pi: ExtensionAPI): void {
 				return;
 			}
 
-			// Step 1: Pick a restore point
-			const options = points.map((p) => `${p.label}  (${p.preview})`);
-			const selected = await ctx.ui.select(
-				"Rewind to which point?",
-				options,
-			);
-			if (selected === undefined) return;
+			// Step 1: Pick a restore point.
+			// Chronological order (oldest first, latest at the bottom) reads as a
+			// natural timeline. Use a custom SelectList so we can move the cursor
+			// to the latest point, which is the most commonly wanted target.
+			const items: SelectItem[] = points.map((p, i) => ({
+				value: String(i),
+				label: p.label,
+				description: p.preview,
+			}));
 
-			const selectedIndex = options.indexOf(selected);
-			if (selectedIndex < 0) return;
+			const latestIndex = items.length - 1;
+
+			const selected = await ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+				const container = new Container();
+				container.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+				container.addChild(
+					new Text(theme.fg("accent", theme.bold("Rewind to which point?"))),
+				);
+
+				const selectList = new SelectList(items, Math.min(items.length, 10), {
+					selectedPrefix: (t) => theme.fg("accent", t),
+					selectedText: (t) => theme.fg("accent", t),
+					description: (t) => theme.fg("muted", t),
+					scrollInfo: (t) => theme.fg("dim", t),
+					noMatch: (t) => theme.fg("warning", t),
+				});
+				selectList.setSelectedIndex(latestIndex);
+				selectList.onSelect = (item) => done(item.value);
+				selectList.onCancel = () => done(null);
+				container.addChild(selectList);
+
+				container.addChild(
+					new Text(
+						theme.fg("dim", "↑↓ navigate • enter select • esc cancel"),
+					),
+				);
+				container.addChild(new DynamicBorder((s) => theme.fg("accent", s)));
+
+				return {
+					render: (w) => container.render(w),
+					invalidate: () => container.invalidate(),
+					handleInput: (data) => {
+						selectList.handleInput(data);
+						tui.requestRender();
+					},
+				};
+			});
+
+			if (selected === null) return;
+
+			const selectedIndex = Number(selected);
+			if (!Number.isInteger(selectedIndex) || selectedIndex < 0 || selectedIndex >= points.length) {
+				return;
+			}
 
 			const point = points[selectedIndex];
 

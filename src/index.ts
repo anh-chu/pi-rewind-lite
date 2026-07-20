@@ -736,8 +736,12 @@ export default function activate(pi: ExtensionAPI): void {
 
 			const point = points[selectedIndex];
 
-			// Step 2: Pick restore mode
-			const canRestoreCode = Object.keys(point.snapshot.files).length > 0;
+			// Step 2: Pick restore mode — only offer code restore when this
+			// snapshot actually has backed-up file content to bring back.
+			const canRestoreCode =
+				Object.values(point.snapshot.files).filter(
+					(f) => f.backupFileName !== null,
+				).length > 0;
 			const modeOptions = canRestoreCode
 				? [
 						"Restore code and conversation",

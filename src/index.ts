@@ -137,6 +137,8 @@ interface RestoreEvent {
 	preRestoreEntryId: string;
 	preRestoreSnapshot: Snapshot | null;
 	timestamp: number;
+	/** "restore" = a /rewind action; "undo" = a /undo-rewind action. */
+	kind: "restore" | "undo";
 }
 
 // ---------------------------------------------------------------------------
@@ -788,6 +790,7 @@ export default function activate(pi: ExtensionAPI): void {
 				preRestoreEntryId: preRestoreEntryId ?? "",
 				preRestoreSnapshot,
 				timestamp: Date.now(),
+				kind: "restore",
 			};
 			pi.appendEntry(ENTRY_TYPE_RESTORE, restoreEvent);
 
@@ -818,10 +821,13 @@ export default function activate(pi: ExtensionAPI): void {
 				return;
 			}
 
-			// Find last restore event
+			// Find restore events. Only /rewind actions (kind "restore") are
+			// undoable; /undo-rewind events (kind "undo") are not.
 			const entries = ctx.sessionManager.getEntries();
 			const restoreEntries = entries.filter(
-				(e: any) => e.customType === ENTRY_TYPE_RESTORE,
+				(e: any) =>
+					e.customType === ENTRY_TYPE_RESTORE &&
+					(e.data as RestoreEvent).kind === "restore",
 			);
 			if (restoreEntries.length === 0) {
 				ctx.ui.notify("No restore to undo", "warning");
@@ -830,6 +836,20 @@ export default function activate(pi: ExtensionAPI): void {
 
 			const lastRestore = restoreEntries.at(-1)!;
 			const event = (lastRestore as any).data as RestoreEvent;
+
+			// Guard against repeated undo: if an undo entry for this restore
+			// already exists, the restore has already been reversed.
+			const entryId = (lastRestore as any).id;
+			const alreadyUndone = entries.some(
+				(e: any) =>
+					e.customType === ENTRY_TYPE_RESTORE &&
+					(e.data as RestoreEvent).kind === "undo" &&
+					(e.data as RestoreEvent).entryId === entryId,
+			);
+			if (alreadyUndone) {
+				ctx.ui.notify("Last restore already undone", "warning");
+				return;
+			}
 
 			const confirmed = await ctx.ui.confirm(
 				"Undo restore",
@@ -855,6 +875,17 @@ export default function activate(pi: ExtensionAPI): void {
 			) {
 				await ctx.navigateTree(event.preRestoreEntryId);
 			}
+
+			// Record the undo so a second /undo-rewind no-ops instead of
+			// re-applying the pre-restore snapshot and clobbering new edits.
+			pi.appendEntry(ENTRY_TYPE_RESTORE, {
+				entryId,
+				mode: event.mode,
+				preRestoreEntryId: event.preRestoreEntryId,
+				preRestoreSnapshot: event.preRestoreSnapshot,
+				timestamp: Date.now(),
+				kind: "undo",
+			} satisfies RestoreEvent);
 
 			const parts: string[] = [];
 			if (filesChanged.length > 0) {

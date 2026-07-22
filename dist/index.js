@@ -428,6 +428,38 @@ function formatTimeAgo(timestamp) {
         return `${hours}h ago`;
     return `${Math.floor(hours / 24)}d ago`;
 }
+/** Extract the text of a user message entry (string content or text blocks). */
+function extractUserMessageText(content) {
+    if (typeof content === "string")
+        return content;
+    if (!Array.isArray(content))
+        return "";
+    return content
+        .filter((b) => b.type === "text" && typeof b.text === "string")
+        .map((b) => b.text)
+        .join("");
+}
+/**
+ * Find the user-message entry that is the child of `parentId` and matches the
+ * snapshot's prompt text. Navigating to this entry rewinds to the prompt AND
+ * restores the prompt text into the input editor (Claude Code-style).
+ */
+function findUserPromptEntry(ctx, parentId, expectedText) {
+    const entries = ctx.sessionManager.getEntries();
+    let fallback = null;
+    for (const entry of entries) {
+        if (entry.type === "message" &&
+            entry.parentId === parentId &&
+            entry.message?.role === "user") {
+            const text = extractUserMessageText(entry.message.content);
+            if (expectedText && text === expectedText)
+                return entry.id;
+            if (!fallback)
+                fallback = entry.id;
+        }
+    }
+    return fallback;
+}
 function getLastUserPrompt(ctx, entryId) {
     const branch = ctx.sessionManager.getBranch(entryId);
     for (let i = branch.length - 1; i >= 0; i--) {
@@ -588,40 +620,65 @@ export default function activate(pi) {
             else {
                 mode = "conversation";
             }
-            // Step 3: Confirm
-            const confirmed = await ctx.ui.confirm("Confirm restore", `Restore ${mode === "both" ? "code + conversation" : mode} to: "${point.label}"?`);
+            // Step 3: Pick restore target — only relevant when rewinding the
+            // conversation. "to output" (default, current behavior) lands at the
+            // prior assistant output with an empty editor. "to prompt" additionally
+            // restores the selected prompt into the input editor so it can be
+            // re-sent/edited (Claude Code-style).
+            let target = "output";
+            if (mode === "conversation" || mode === "both") {
+                const targetChoice = await ctx.ui.select("Restore conversation to?", ["Restore to output", "Restore to prompt (prefill input)", "Cancel"]);
+                if (!targetChoice || targetChoice === "Cancel")
+                    return;
+                target = targetChoice.startsWith("Restore to prompt") ? "prompt" : "output";
+            }
+            // Step 4: Confirm
+            const confirmed = await ctx.ui.confirm("Confirm restore", `Restore ${mode === "both" ? "code + conversation" : mode}${target === "prompt" ? " (to prompt)" : ""} to: "${point.label}"?`);
             if (!confirmed)
                 return;
-            // Step 4: Capture pre-restore state for undo
+            // Step 5: Capture pre-restore state for undo
             const preRestoreEntryId = ctx.sessionManager.getLeafId();
             const preRestoreSnapshot = await captureCurrentState();
-            // Step 5: Execute restore
+            // Step 6: Execute restore
             let filesChanged = [];
             if (mode === "code" || mode === "both") {
                 filesChanged = await restoreFiles(point.snapshot);
             }
+            let promptPrefilled = false;
             if (mode === "conversation" || mode === "both") {
                 if (ctx.navigateTree) {
-                    await ctx.navigateTree(point.entryId);
+                    if (target === "prompt") {
+                        // Navigate to the user-message child of the snapshot entry so
+                        // the prompt text is restored into the input editor.
+                        const promptEntryId = findUserPromptEntry(ctx, point.snapshot.entryId, point.snapshot.label);
+                        await ctx.navigateTree(promptEntryId ?? point.snapshot.entryId);
+                        promptPrefilled = !!promptEntryId;
+                    }
+                    else {
+                        await ctx.navigateTree(point.snapshot.entryId);
+                    }
                 }
             }
-            // Step 6: Record the restore event for undo
+            // Step 7: Record the restore event for undo
             const restoreEvent = {
-                entryId: point.entryId,
+                entryId: point.snapshot.entryId,
                 mode,
+                target,
                 preRestoreEntryId: preRestoreEntryId ?? "",
                 preRestoreSnapshot,
                 timestamp: Date.now(),
                 kind: "restore",
             };
             pi.appendEntry(ENTRY_TYPE_RESTORE, restoreEvent);
-            // Step 7: Notify
+            // Step 8: Notify
             const parts = [];
             if (filesChanged.length > 0) {
                 parts.push(`${filesChanged.length} file(s) restored`);
             }
             if (mode === "conversation" || mode === "both") {
-                parts.push("conversation rewound");
+                parts.push(target === "prompt" && promptPrefilled
+                    ? "conversation rewound, prompt in input"
+                    : "conversation rewound");
             }
             ctx.ui.notify(`✓ ${parts.join(", ")}`, "info");
         },
